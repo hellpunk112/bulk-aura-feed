@@ -1,13 +1,16 @@
 // Saves BULK's Aura leaderboard (active traders) to aura-leaderboard.json.
-// app.bulk.trade sits behind a Vercel bot checkpoint, so this uses a real Chrome.
+// app.bulk.trade sits behind a Vercel bot checkpoint that blocks datacenter IPs (incl. GitHub Actions),
+// so this drives an already-running Chrome over CDP: CDP_URL=http://localhost:29229 node fetch.mjs
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { chromium } from 'playwright-core';
 
 const OUT = 'aura-leaderboard.json';
-const browser = await chromium.launch({ channel: 'chrome', headless: false, args: ['--headless=new', '--no-sandbox'] });
+const cdp = process.env.CDP_URL;
+const browser = cdp ? await chromium.connectOverCDP(cdp) : await chromium.launch({ channel: 'chrome', headless: false, args: ['--headless=new', '--no-sandbox'] });
+let page;
 try {
-  const ctx = await browser.newContext({ userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36' });
-  const page = await ctx.newPage();
+  const ctx = cdp ? browser.contexts()[0] : await browser.newContext({ userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36' });
+  page = await ctx.newPage();
   const base = 'https://app.bulk.trade/api/aura/v1/aura/leaderboard?page_size=100&sort_by=aura&sort_direction=desc';
   await page.goto(`${base}&page=1`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
   let ok = false;
@@ -53,5 +56,6 @@ try {
     console.log(`Saved ${traders.length} traders of ${data.totalWallets} wallets`);
   }
 } finally {
-  await browser.close();
+  if (cdp) await page?.close().catch(() => {});
+  await browser.close().catch(() => {});
 }
